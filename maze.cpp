@@ -5,6 +5,8 @@
 
 #include "maze.hpp"
 
+int upper_y, upper_x;
+
 /*
  * public functions
  */
@@ -20,8 +22,10 @@ void Maze::print() {
 }
 
 void Maze::draw(int top_y, int top_x) {
+  upper_y = top_y;
+  upper_x = top_x;
   // draw outer box
-  DrawRectangleLines(top_x, top_y, MAZE_SIZE_2D, MAZE_SIZE_2D, WHITE);
+  DrawRectangleLines(upper_x, upper_y, MAZE_SIZE_2D, MAZE_SIZE_2D, WHITE);
 
   // iterate through each cell and for each of its adjacent cells if there is no
   // edge between them draw a line
@@ -29,10 +33,7 @@ void Maze::draw(int top_y, int top_x) {
     for (const std::uint32_t adj_cell : adjacent_cells(cell)) {
       // skips cells that are less than current cell to avoid redrawing lines
       if (adj_cell > cell && !(maze[cell].count(adj_cell))) {
-        int start_y =
-            top_y + ((adj_cell / COLS) * static_cast<int>(grid_size.y));
-        int start_x =
-            top_x + ((adj_cell % COLS) * static_cast<int>(grid_size.x));
+        auto [start_y, start_x] = cell_starting_coords(adj_cell);
 
         int end_y = start_y;
         int end_x = start_x;
@@ -49,12 +50,21 @@ void Maze::draw(int top_y, int top_x) {
     }
   }
 
+  // TODO draw black lines over the start and end spots
+  // TODO fix the math here its all jumbled
+  auto [maze_start_y, maze_start_x] = cell_starting_coords(maze_start);
+  DrawLine(maze_start_x, maze_start_y, maze_start_x, maze_start_y + grid_size.y,
+           BLACK);
+
+  auto [maze_end_y, maze_end_x] = cell_starting_coords(maze_end);
+  DrawLine(maze_end_x, maze_end_y, maze_end_x, maze_end_y + grid_size.y, BLACK);
+
   int rounded_x =
-      top_x + (static_cast<int>(pc.x) -
-               (static_cast<int>(pc.x) % static_cast<int>(grid_size.x)));
+      upper_x + (static_cast<int>(pc.x) -
+                 (static_cast<int>(pc.x) % static_cast<int>(grid_size.x)));
   int rounded_y =
-      top_y + (static_cast<int>(pc.y) -
-               (static_cast<int>(pc.y) % static_cast<int>(grid_size.y)));
+      upper_y + (static_cast<int>(pc.y) -
+                 (static_cast<int>(pc.y) % static_cast<int>(grid_size.y)));
   int radius = std::min(grid_size.x, grid_size.y) / 2;
 
   // draw the player location as a circle snapped to grid
@@ -80,6 +90,11 @@ std::vector<std::uint32_t> Maze::adjacent_cells(std::uint32_t cell) {
     adj_cells.push_back(cell + COLS);
 
   return adj_cells;
+}
+
+std::pair<int, int> Maze::cell_starting_coords(std::uint32_t cell) {
+  return {upper_y + ((cell / COLS) * static_cast<int>(grid_size.y)),
+          upper_x + ((cell % COLS) * static_cast<int>(grid_size.x))};
 }
 
 /* interaction with maze */

@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <stdexcept>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 #include "game_settings.hpp"
@@ -14,7 +15,7 @@ typedef enum { UP, DOWN, LEFT, RIGHT } Direction;
 class Maze {
  public:
   inline void move_player(Direction d) {
-    Vector2 original_pc{pc};
+    Vector3 original_pc{pc};
 
     std::uint32_t init_cell =
         (static_cast<std::uint32_t>(pc.y / grid_size.y) * COLS) +
@@ -53,16 +54,22 @@ class Maze {
   }
 
   inline void update(std::uint16_t y, std::uint16_t x) {
-    // TODO if this is not an edge cell then throw an error
     if (y >= ROWS)
       throw std::runtime_error("Maze update: coordinates out of bounds.");
 
     if (x >= COLS)
       throw std::runtime_error("Maze update: coordinates out of bounds.");
 
+    if (y != 0 && y != ROWS - 1 && x != 0 && x != COLS - 1)
+      throw std::runtime_error(
+          "Maze update: invalid coordinates for start - they do not fall along "
+          "the maze wall");
+
+    std::uint32_t starting_cell = (y * COLS) + x;
     DFS((y * COLS) + x);
 
-    maze_start = x * y;
+    maze_start = starting_cell;
+    maze_end = (COLS - 1) * (ROWS - 1);
     // TODO set maze_end, I think just compile a list of all possible edge
     // pieces and choose one?
   }
@@ -70,7 +77,7 @@ class Maze {
   void print();  // for debugging purposes
   void draw(int top_y, int top_x);
 
-  Vector2 pc{0.0, 0.0};
+  Vector3 pc{0.0, 0.0, 0.0};
   Vector2 grid_size{static_cast<float>(MAZE_SIZE_2D) / ROWS,
                     static_cast<float>(MAZE_SIZE_2D) / COLS};
 
@@ -84,6 +91,7 @@ class Maze {
 
   /* translation */
   std::vector<std::uint32_t> adjacent_cells(std::uint32_t cell);
+  std::pair<int, int> cell_starting_coords(std::uint32_t cell);
 
   /* interaction with maze */
   void add_edge(std::uint32_t from, std::uint32_t to);

@@ -7,6 +7,10 @@
 #include "maze.hpp"
 
 int main(int argc, char** argv) {
+  // TODO make a clear distinction somewhere about how 2d coords map to 3d
+  // coords. probably make a number of squares per grid and then divide pc by
+  // grid number to get it
+  // TODO make it work with asymmetrical COL & ROW sizes
   Maze m{};
   m.update(0, 0);
 
@@ -49,7 +53,7 @@ int main(int argc, char** argv) {
     if (IsKeyPressed(KEY_RIGHT) || IsKeyDown(KEY_RIGHT))
       m.move_player(Direction::RIGHT);
 
-    m.draw(300, 400);
+    m.draw(10, 10);
 
     EndDrawing();
   }
