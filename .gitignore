@@ -1,2 +1,3 @@
 *.o
 maze
+compile_commands.json
