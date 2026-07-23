@@ -54,23 +54,31 @@ int main(int argc, char** argv) {
     if (IsKeyPressed(KEY_Q))
       goto done;
 
-    if (IsKeyDown(KEY_UP) || IsKeyDown(KEY_W))
-      m.move_player(Direction::UP);
-    if (IsKeyDown(KEY_DOWN) || IsKeyDown(KEY_S))
-      m.move_player(Direction::DOWN);
-    if (IsKeyDown(KEY_LEFT) || IsKeyDown(KEY_A))
-      m.move_player(Direction::LEFT);
-    if (IsKeyDown(KEY_RIGHT) || IsKeyDown(KEY_D))
-      m.move_player(Direction::RIGHT);
-    if (IsKeyPressed(KEY_R))
-      m.update(0, 0);
-
-    // update Camera.position to be equal to pc.x, pc.y, pc.z scaled by 3d grid
-    // size
+    Vector3 old_position = camera.position;
     UpdateCamera(&camera, camera_mode);
+    Vector3 camera_movement{
+        camera.position.x - old_position.x,
+        camera.position.y - old_position.y,
+        camera.position.z - old_position.z,
+    };
+    camera.position = old_position;
+    camera.target.x -= camera_movement.x;
+    camera.target.y -= camera_movement.y;
+    camera.target.z -= camera_movement.z;
 
-    std::cout << camera.target.x << " " << camera.target.y << " "
-              << camera.target.z << std::endl;
+    if (IsKeyDown(KEY_UP) || IsKeyDown(KEY_W))
+      m.move_player(Direction::UP, camera);
+    if (IsKeyDown(KEY_DOWN) || IsKeyDown(KEY_S))
+      m.move_player(Direction::DOWN, camera);
+    if (IsKeyDown(KEY_LEFT) || IsKeyDown(KEY_A))
+      m.move_player(Direction::LEFT, camera);
+    if (IsKeyDown(KEY_RIGHT) || IsKeyDown(KEY_D))
+      m.move_player(Direction::RIGHT, camera);
+
+    if (IsKeyPressed(KEY_R)) {
+      m.update(0, 0);
+      m.sync_camera(camera);
+    }
 
     m.draw(10, 10, camera);
 

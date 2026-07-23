@@ -16,13 +16,13 @@ class Maze {
  public:
   Maze();
 
-  void move_player(Direction d);
+  void move_player(Direction d, Camera& camera);
   void update(std::uint16_t y, std::uint16_t x);
   void print();  // for debugging purposes
   void draw(int top_y, int top_x, const Camera& camera);
+  void sync_camera(Camera& camera);
 
  private:
-  /* variables */
   std::mt19937 rand;
   std::array<std::unordered_set<std::uint32_t>, COLS * COLS> maze{};
   Vector3 pc{0.0, 0.0, 0.0};
@@ -39,6 +39,10 @@ class Maze {
   std::pair<int, int> exit_coords(std::uint32_t cell, bool start);
   void draw_2d();
   void draw_3d(const Camera& camera);
+
+  /* 3D helpers */
+  std::uint32_t player_cell();
+  bool can_cross(std::uint32_t from, std::uint32_t to);
 
   /* interaction with maze */
   void add_edge(std::uint32_t from, std::uint32_t to);

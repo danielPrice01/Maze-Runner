@@ -9,6 +9,8 @@ constexpr int COLS{10};
 constexpr int MAZE_SIZE_2D{200};
 constexpr int MAZE_SIZE_3D{200};
 
-constexpr int MAZE_HEIGHT{};
+constexpr float WALL_HEIGHT{2.5f};
+constexpr float WALL_THICKNESS{0.12f};
+constexpr float PLAYER_EYE_HEIGHT{1.0f};
 
 constexpr float PLAYER_GRID_SPEED{0.15f};

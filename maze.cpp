@@ -1,11 +1,39 @@
 #include <raylib.h>
 #include <algorithm>
+#include <cmath>
 #include <iostream>
 #include <stdexcept>
 
 #include "maze.hpp"
 
-int upper_y, upper_x;
+namespace {
+int upper_y = 0;
+int upper_x = 0;
+
+Direction border_direction(std::uint32_t cell) {
+  if (cell % COLS == 0)
+    return LEFT;
+  if ((cell + 1) % COLS == 0)
+    return RIGHT;
+  if (cell < COLS)
+    return UP;
+  return DOWN;
+}
+
+Direction direction_between(std::uint32_t from, std::uint32_t to) {
+  int diff = static_cast<int>(to) - static_cast<int>(from);
+  if (diff == -static_cast<int>(COLS))
+    return UP;
+  if (diff == static_cast<int>(COLS))
+    return DOWN;
+  if (diff == -1)
+    return LEFT;
+  if (diff == 1)
+    return RIGHT;
+
+  throw std::runtime_error("Invalid Direction");
+}
+}  // namespace
 
 /*
  * constructor
@@ -16,72 +44,81 @@ Maze::Maze() : rand(std::random_device{}()) {}
  * public functions
  */
 
-void Maze::move_player(Direction d) {
-  // TODO using the players angle get a movement for all directions (i.e. if
-  // player is facing 45 degrees then w should move then equally forwards and
-  // sideways)
-  // then for depicting where the character is, multiply the pc location by the
-  // grid size of that dimension
-  // the logic of this needs to be totally rethought out. First calculate the x
-  // and y displacment based on the angle and the direction of movement. Then
-  // clamp the x and y directions (or x, z directions?) based on where there are
-  // walls
-  // I think that the camera "angle" is probably found using the camera target?
-  // (I think it just changes the x position) (between 3 and -3?)
-  // also need to decide how thick each wall will be and put that into the
-  // calcuation somewhere as well
+void Maze::move_player(Direction d, Camera& camera) {
+  Vector3 forward = {
+      camera.target.x - camera.position.x,
+      0.0f,
+      camera.target.z - camera.position.z,
+  };
+  float forward_len = sqrtf(forward.x * forward.x + forward.z * forward.z);
 
-  // calculate player angle. calculate x, y displacement based on angle (i think
-  // cos?). calculate new x,y coordinates. clamp x,y coordinates based on grid
-  // borders
+  if (forward_len < 0.0001f)
+    return;
 
-  // talking to claude; get the direction vector (relation between target and
-  // position), and normalize this. Then scalar multiply each by speed and add
-  // it to pc. After that, check whether there is a border at either direction
-  // and clamp.
-  Vector3 original_pc{pc};
+  forward.x /= forward_len;
+  forward.z /= forward_len;
 
-  std::uint32_t init_cell =
-      (static_cast<std::uint32_t>(pc.y / grid_size_2d) * COLS) +
-      static_cast<std::uint32_t>(pc.x / grid_size_2d);
+  Vector3 right{forward.z, 0.0f, -forward.x};
 
-  int speed_y = static_cast<int>(PLAYER_GRID_SPEED * grid_size_2d);
-  int speed_x = static_cast<int>(PLAYER_GRID_SPEED * grid_size_2d);
-
+  Vector3 movement{};
   switch (d) {
     case UP:
-      pc.y = (pc.y - speed_y < 0) ? 0 : pc.y - speed_y;
+      movement = forward;
       break;
     case DOWN:
-      pc.y = (pc.y + speed_y >= MAZE_SIZE_2D - grid_size_2d)
-                 ? MAZE_SIZE_2D - grid_size_2d
-                 : pc.y + speed_y;
+      movement = Vector3{-forward.x, 0.0f, -forward.z};
       break;
     case LEFT:
-      pc.x = (pc.x - speed_x < 0) ? 0 : pc.x - speed_x;
+      movement = Vector3{-right.x, 0.0f, -right.z};
       break;
     case RIGHT:
-      pc.x = (pc.x + speed_x >= MAZE_SIZE_2D - grid_size_2d)
-                 ? MAZE_SIZE_2D - grid_size_2d
-                 : pc.x + speed_x;
+      movement = right;
       break;
     default:
-      std::runtime_error("Invalid movement");
+      throw std::runtime_error("Invalid movement direction");
   }
 
-  std::uint32_t end_cell =
-      (static_cast<std::uint32_t>(pc.y / grid_size_2d) * COLS) +
-      static_cast<std::uint32_t>(pc.x / grid_size_2d);
+  float step = PLAYER_GRID_SPEED;
+  const Vector3 old_pc{pc};
 
-  if (end_cell != init_cell && !(maze.at(init_cell).count(end_cell)))
-    pc = original_pc;
+  // Moves one axis at a time in order to prevent diagonal corner clipping. Also
+  // allows player to slide along the walls.
+  auto try_axis_move = [this](float delta, bool x_axis) {
+    if (std::fabs(delta) <= 0.0001f)
+      return;
+
+    const std::uint32_t before = player_cell();
+    Vector3 candidate = pc;
+
+    if (x_axis)
+      candidate.x += delta;
+    else
+      candidate.z += delta;
+
+    float epsilon = 0.001f;
+    candidate.x = std::clamp(candidate.x, 0.0f, MAZE_SIZE_3D - epsilon);
+    candidate.z = std::clamp(candidate.z, 0.0f, MAZE_SIZE_3D - epsilon);
+
+    int row =
+        std::clamp(static_cast<int>(candidate.z / grid_size_3d), 0, COLS - 1);
+    int col =
+        std::clamp(static_cast<int>(candidate.x / grid_size_3d), 0, COLS - 1);
+    std::uint32_t after = static_cast<std::uint32_t>(row * COLS + col);
+
+    if (after == before || can_cross(before, after))
+      pc = candidate;
+  };
+
+  try_axis_move(movement.x * step, true);
+  try_axis_move(movement.z * step, false);
+  (void)old_pc;
+  sync_camera(camera);
 }
 
 void Maze::update(std::uint16_t y, std::uint16_t x) {
-  pc = Vector3{0.0f, 0.0f, 0.0f};
   visited.fill(false);
-  for (size_t i = 0; i < maze.size(); ++i)
-    maze[i].clear();
+  for (auto& edges : maze)
+    edges.clear();
 
   if (y >= COLS)
     throw std::runtime_error("Maze update: coordinates out of bounds.");
@@ -101,17 +138,16 @@ void Maze::update(std::uint16_t y, std::uint16_t x) {
 
   // besides the starting cell, all edge cells are valid ending cells
   std::vector<std::uint32_t> possible_ending_cells{};
-  possible_ending_cells.resize(COLS);
+  possible_ending_cells.reserve(4 * COLS);
 
-  std::iota(possible_ending_cells.begin(), possible_ending_cells.end(), 0u);
-  possible_ending_cells.resize(2 * COLS);
-  std::iota(possible_ending_cells.begin() + COLS, possible_ending_cells.end(),
-            static_cast<std::uint32_t>((COLS - 1) * COLS));
+  for (std::uint32_t c = 0; c < COLS; ++c) {
+    possible_ending_cells.push_back(c);
+    possible_ending_cells.push_back((COLS - 1) * COLS + c);
+  }
 
-  possible_ending_cells.reserve(possible_ending_cells.size() + (2 * COLS));
-  for (std::uint32_t r = 0; r < COLS; ++r) {
+  for (std::uint32_t r = 1; r + 1 < COLS; ++r) {
     possible_ending_cells.push_back(r * COLS);
-    possible_ending_cells.push_back((r * COLS) + COLS - 1);
+    possible_ending_cells.push_back(r * COLS + COLS - 1);
   }
 
   std::erase(possible_ending_cells, starting_cell);
@@ -120,16 +156,21 @@ void Maze::update(std::uint16_t y, std::uint16_t x) {
       0, possible_ending_cells.size() - 1);
 
   maze_end = possible_ending_cells[dist(rand)];
+
+  // Spawn player at center of requested starting cell
+  pc.x = (static_cast<float>(x) + 0.5f) * grid_size_3d;
+  pc.y = 0.05f;
+  pc.z = (static_cast<float>(y) + 0.5f) * grid_size_3d;
 }
 
 void Maze::print() {
-  std::cout << "Format:\n Cellno: Neighbors" << std::endl;
+  std::cout << "Format:\n Cellno: Neighbors\n";
   for (std::uint32_t i = 0; i < COLS * COLS; ++i) {
     std::cout << i << " : ";
     for (const auto& edge : maze.at(i)) {
       std::cout << edge << " ";
     }
-    std::cout << std::endl;
+    std::cout << "\n";
   }
 
   std::cout << "Starting cell: " << maze_start << std::endl;
@@ -150,16 +191,14 @@ void Maze::draw(int top_y, int top_x, const Camera& camera) {
 
 std::vector<std::uint32_t> Maze::adjacent_cells(std::uint32_t cell) {
   std::vector<std::uint32_t> adj_cells{};
-  if (static_cast<std::int64_t>(cell) - 1 >= 0 && cell % COLS != 0)
-    adj_cells.push_back(cell - 1);
-  if (static_cast<std::int64_t>(cell) + 1 < COLS * COLS &&
-      (cell + 1) % COLS != 0)
-    adj_cells.push_back(cell + 1);
 
-  // up, down neighbors
-  if (static_cast<std::int64_t>(cell) - COLS >= 0)
+  if (cell % COLS != 0)
+    adj_cells.push_back(cell - 1);
+  if ((cell + 1) % COLS != 0)
+    adj_cells.push_back(cell + 1);
+  if (cell >= COLS)
     adj_cells.push_back(cell - COLS);
-  if (static_cast<std::int64_t>(cell) + COLS < COLS * COLS)
+  if (cell + COLS < COLS * COLS)
     adj_cells.push_back(cell + COLS);
 
   return adj_cells;
@@ -172,6 +211,7 @@ std::pair<int, int> Maze::cell_starting_coords(std::uint32_t cell) {
 
 std::pair<int, int> Maze::cell_ending_coords(std::uint32_t cell, Direction d) {
   auto [x, y] = cell_starting_coords(cell);
+
   switch (d) {
     case UP:
     case DOWN:
@@ -186,31 +226,6 @@ std::pair<int, int> Maze::cell_ending_coords(std::uint32_t cell, Direction d) {
   }
 
   return std::pair{x, y};
-}
-
-Direction border_direction(std::uint32_t cell) {
-  if (cell % COLS == 0)
-    return LEFT;
-  if ((cell + 1) % COLS == 0)
-    return RIGHT;
-  if (cell < COLS)
-    return UP;
-
-  return DOWN;
-}
-
-Direction direction_between(std::uint32_t from, std::uint32_t to) {
-  int diff = static_cast<int>(to) - static_cast<int>(from);
-  if (diff == -static_cast<int>(COLS))
-    return UP;
-  if (diff == static_cast<int>(COLS))
-    return DOWN;
-  if (diff == -1)
-    return LEFT;
-  if (diff == 1)
-    return RIGHT;
-
-  throw std::runtime_error("Invalid Direction");
 }
 
 std::pair<int, int> Maze::exit_coords(std::uint32_t cell, bool start) {
@@ -243,7 +258,6 @@ std::pair<int, int> Maze::exit_coords(std::uint32_t cell, bool start) {
 
 void Maze::draw_2d() {
   // draw black box for the 2d map
-  // RLAPI void DrawRectangleRecV(Vector2 start, Vector2 width, Color color);
   DrawRectangleV(Vector2{.x = static_cast<float>(upper_x),
                          .y = static_cast<float>(upper_y)},
                  Vector2{.x = static_cast<float>(MAZE_SIZE_2D),
@@ -278,25 +292,120 @@ void Maze::draw_2d() {
   auto [end_x2, end_y2] = exit_coords(maze_end, false);
   DrawLine(end_x1, end_y1, end_x2, end_y2, BLACK);
 
-  int rounded_x =
-      upper_x + (static_cast<int>(pc.x) -
-                 (static_cast<int>(pc.x) % static_cast<int>(grid_size_2d)));
-  int rounded_y =
-      upper_y + (static_cast<int>(pc.y) -
-                 (static_cast<int>(pc.y) % static_cast<int>(grid_size_2d)));
-  int radius = grid_size_2d / 2;
+  int col = std::clamp(static_cast<int>(pc.x / grid_size_3d), 0, COLS - 1);
+  int row = std::clamp(static_cast<int>(pc.z / grid_size_3d), 0, COLS - 1);
+
+  float map_x = static_cast<float>(upper_x) +
+                (static_cast<float>(col) + 0.5f) * grid_size_2d;
+  float map_y = static_cast<float>(upper_y) +
+                (static_cast<float>(row) + 0.5f) * grid_size_2d;
 
   // draw the player location as a circle snapped to grid
-  DrawCircle(rounded_x + radius, rounded_y + radius, radius, RED);
+  DrawCircleV(Vector2{map_x, map_y}, grid_size_2d * 0.3f, RED);
 }
 
 void Maze::draw_3d(const Camera& camera) {
   BeginMode3D(camera);
 
-  DrawPlane(Vector3{0.0f, 0.0f, 0.0f}, Vector2{MAZE_SIZE_3D, MAZE_SIZE_3D},
-            LIGHTGRAY);
+  float half_maze = MAZE_SIZE_3D * 0.5f;
+
+  DrawPlane(Vector3{half_maze, 0.0f, half_maze},
+            Vector2{MAZE_SIZE_3D, MAZE_SIZE_3D}, LIGHTGRAY);
+
+  auto draw_wall_x = [this](float x, float z) {
+    DrawCube(Vector3{x, WALL_HEIGHT * 0.5f, z}, grid_size_3d + WALL_THICKNESS,
+             WALL_HEIGHT, WALL_THICKNESS, DARKGRAY);
+  };
+
+  auto draw_wall_z = [this](float x, float z) {
+    DrawCube(Vector3{x, WALL_HEIGHT * 0.5f, z}, WALL_THICKNESS, WALL_HEIGHT,
+             grid_size_3d + WALL_THICKNESS, DARKGRAY);
+  };
+
+  // Interior walls; draw right and down walls to avoid redrawing
+  for (std::uint32_t cell = 0; cell < maze.size(); ++cell) {
+    const std::uint32_t row = cell / COLS;
+    const std::uint32_t col = cell % COLS;
+
+    const float cell_x = static_cast<float>(col) * grid_size_3d;
+    const float cell_z = static_cast<float>(row) * grid_size_3d;
+
+    if (col + 1 < COLS) {
+      const std::uint32_t right = cell + 1;
+      if (!maze[cell].count(right)) {
+        draw_wall_z(cell_x + grid_size_3d, cell_z + grid_size_3d * 0.5f);
+      }
+    }
+
+    if (row + 1 < COLS) {
+      const std::uint32_t down = cell + COLS;
+      if (!maze[cell].count(down)) {
+        draw_wall_x(cell_x + grid_size_3d * 0.5f, cell_z + grid_size_3d);
+      }
+    }
+  }
+
+  // Outer walls, leaving openings for start and exit
+  for (std::uint32_t i = 0; i < COLS; ++i) {
+    const std::uint32_t top_cell = i;
+    const std::uint32_t bottom_cell = (COLS - 1) * COLS + i;
+    const std::uint32_t left_cell = i * COLS;
+    const std::uint32_t right_cell = i * COLS + COLS - 1;
+
+    const float center = (static_cast<float>(i) + 0.5f) * grid_size_3d;
+
+    if (top_cell != maze_start && top_cell != maze_end)
+      draw_wall_x(center, 0.0f);
+    if (bottom_cell != maze_start && bottom_cell != maze_end)
+      draw_wall_x(center, MAZE_SIZE_3D);
+    if (left_cell != maze_start && left_cell != maze_end)
+      draw_wall_z(0.0f, center);
+    if (right_cell != maze_start && right_cell != maze_end)
+      draw_wall_z(MAZE_SIZE_3D, center);
+  }
 
   EndMode3D();
+}
+
+std::uint32_t Maze::player_cell() {
+  int row = std::clamp(static_cast<int>(pc.z / grid_size_3d), 0, COLS - 1);
+  int col = std::clamp(static_cast<int>(pc.x / grid_size_3d), 0, COLS - 1);
+
+  return static_cast<std::uint32_t>(row * COLS + col);
+}
+
+bool Maze::can_cross(std::uint32_t from, std::uint32_t to) {
+  if (from >= maze.size() || to >= maze.size())
+    return false;
+
+  int from_row = static_cast<int>(from / COLS);
+  int from_col = static_cast<int>(from % COLS);
+  int to_row = static_cast<int>(to / COLS);
+  int to_col = static_cast<int>(to % COLS);
+
+  if (std::abs(from_row - to_row) + std::abs(from_col - to_col) != 1)
+    return false;
+
+  return maze[from].count(to) != 0;
+}
+
+void Maze::sync_camera(Camera& camera) {
+  const Vector3 old_position = camera.position;
+  const Vector3 offset{
+      camera.target.x - old_position.x,
+      camera.target.y - old_position.y,
+      camera.target.z - old_position.z,
+  };
+
+  camera.position.x = pc.x;
+  camera.position.y = PLAYER_EYE_HEIGHT;
+  camera.position.z = pc.z;
+
+  camera.target = Vector3{
+      camera.position.x + offset.x,
+      camera.position.y + offset.y,
+      camera.position.z + offset.z,
+  };
 }
 
 /* interaction with maze */
